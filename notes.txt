@@ -1,0 +1,84 @@
+1) Make sure your Kind cluster exposes ports
+Create a kind-config.yaml file and add the following:
+
+apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraPortMappings:
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+
+
+Then create the cluster:
+kind create cluster --config k8s/kind-config.yaml
+
+
+2) Install the NGINX Ingress controller
+Run this in WSL where kind is running:
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+
+Wait for it to become ready:
+kubectl wait --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=180s
+
+
+3) Make the app reachable through Ingress
+Your app should be a ClusterIP Service, not a LoadBalancer, when using Ingress.
+
+* Use a service like this:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-app
+spec:
+  selector:
+    app: python-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+
+
+* Then create an ingress:
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: python-app
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: python-app.test.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: python-app
+            port:
+              number: 80
+
+Apply it:
+kubectl apply -f k8s/ingress.yaml
+
+4) Access it from your Windows browser
+Add this line to your Windows hosts file:
+127.0.0.1 python-app.test.com
+
+Then open this in your Windows browser:
+http://python-app.test.com/api/v1/info
